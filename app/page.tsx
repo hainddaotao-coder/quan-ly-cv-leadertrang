@@ -12,8 +12,6 @@ type Task = {
   createdAt: string;
 };
 
-const STORAGE_KEY = "pkc-leader-trang-tasks-v2";
-
 const sampleTasks: Task[] = [
   { id:"u1", title:"Xử lý ca cấp cứu chó Mít", note:"Khó thở, theo dõi SpO₂ và đáp ứng oxy", category:"urgent", done:false, createdAt:"sample" },
   { id:"u2", title:"Duyệt phác đồ điều trị nội trú", note:"Hoàn tất trước 10:00", category:"urgent", done:true, createdAt:"sample" },
@@ -69,24 +67,47 @@ function TaskCard({ task, onToggle, onDelete, onDragStart }: {
 
 export default function Home() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
   const [category, setCategory] = useState<Category>("urgent");
 
-  useEffect(() => {
+  async function loadTasks() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setTasks(JSON.parse(saved)); else setTasks(sampleTasks);
-    } catch { /* Keep the app usable if browser storage is unavailable. */ }
-    setHydrated(true);
-  }, []);
+      setError("");
+      const response = await fetch("/api/tasks", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || data.success === false) throw new Error(data.error || "Không thể tải công việc.");
+      setTasks(Array.isArray(data.tasks) ? data.tasks : []);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Không thể tải công việc.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  useEffect(() => {
-    if (hydrated) localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-  }, [tasks, hydrated]);
+  useEffect(() => { void loadTasks(); }, []);
+
+  async function sync(payload: Record<string, unknown>) {
+    setSyncing(true);
+    setError("");
+    try {
+      const response = await fetch("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await response.json();
+      if (!response.ok || data.success === false) throw new Error(data.error || "Không thể đồng bộ dữ liệu.");
+      await loadTasks();
+      return true;
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Không thể đồng bộ dữ liệu.");
+      return false;
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const dailyTasks = tasks.filter((task) => task.category !== "week");
   const completed = dailyTasks.filter((task) => task.done).length;
@@ -96,27 +117,27 @@ export default function Home() {
     (["urgent", "important", "routine", "week", "cases"] as Category[]).map((key) => [key, tasks.filter((task) => task.category === key)])
   ) as Record<Category, Task[]>, [tasks]);
 
-  function addTask(event: FormEvent) {
+  async function addTask(event: FormEvent) {
     event.preventDefault();
     if (!title.trim()) return;
-    setTasks((current) => [...current, {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, title: title.trim(), note: note.trim(), category, done: false, createdAt: new Date().toISOString(),
-    }]);
-    setTitle(""); setNote(""); setShowForm(false);
+    const saved = await sync({ action: "create", title: title.trim(), note: note.trim(), category });
+    if (saved) { setTitle(""); setNote(""); setShowForm(false); }
   }
 
-  function toggleTask(id: string) {
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, done: !task.done } : task));
+  async function toggleTask(id: string) {
+    const task = tasks.find((item) => item.id === id);
+    if (task) await sync({ action: "update", id, done: !task.done });
   }
 
-  function deleteTask(id: string) {
-    if (confirm("Xóa công việc này?")) setTasks((current) => current.filter((task) => task.id !== id));
+  async function deleteTask(id: string) {
+    if (confirm("Xóa công việc này?")) await sync({ action: "delete", id });
   }
 
-  function moveTask(target: Category) {
+  async function moveTask(target: Category) {
     if (!draggedId) return;
-    setTasks((current) => current.map((task) => task.id === draggedId ? { ...task, category: target } : task));
+    const id = draggedId;
     setDraggedId(null);
+    await sync({ action: "update", id, category: target });
   }
 
   function closeDay() {
@@ -125,14 +146,14 @@ export default function Home() {
     window.print();
   }
 
-  function clearDay() {
+  async function clearDay() {
     if (confirm("Chỉ thực hiện sau khi anh đã lưu PDF. Xóa toàn bộ công việc trong ngày? Các việc trong tuần vẫn được giữ lại.")) {
-      setTasks((current) => current.filter((task) => task.category === "week"));
+      await sync({ action: "archiveDay" });
     }
   }
 
-  function loadSampleData() {
-    if (confirm("Nạp lại toàn bộ dữ liệu mẫu? Dữ liệu hiện tại sẽ được thay thế.")) setTasks(sampleTasks);
+  async function loadSampleData() {
+    if (confirm("Nạp lại toàn bộ dữ liệu mẫu? Dữ liệu hiện tại sẽ được thay thế.")) await sync({ action: "resetSample" });
   }
 
   return (
@@ -150,6 +171,11 @@ export default function Home() {
         <div><p className="eyebrow">{todayLabel()}</p><h1>Chào Bác sĩ Trang,<br/><em>sẵn sàng cho một ngày hiệu quả.</em></h1><p className="role-line">Leader Trang · PKC Pet Center</p></div>
         <div className="progress-card"><div><span>Tiến độ hôm nay</span><strong>{completed}/{dailyTasks.length} việc</strong></div><div className="progress"><i style={{ width: `${progress}%` }} /></div><small>{progress}% hoàn thành</small></div>
       </section>
+
+      {(loading || syncing || error) && <section className={`sync-status ${error ? "has-error" : ""}`}>
+        <span>{loading ? "Đang tải dữ liệu từ Google Sheet…" : syncing ? "Đang đồng bộ Google Sheet…" : error}</span>
+        {error && <button onClick={() => void loadTasks()}>Thử lại</button>}
+      </section>}
 
       <section className="case-section" onDragOver={(e) => e.preventDefault()} onDrop={() => moveTask("cases")}>
         <header className="case-header">
@@ -185,7 +211,7 @@ export default function Home() {
         </aside>
       </section>
 
-      <footer><p>Tài khoản sử dụng: <strong>Bác sĩ – Leader Trang</strong> · Dữ liệu đang lưu trên trình duyệt này.</p><div><button onClick={closeDay}>Chốt ngày & xuất PDF</button><button className="danger" onClick={clearDay}>Xóa dữ liệu ngày</button></div></footer>
+      <footer><p>Tài khoản sử dụng: <strong>Bác sĩ – Leader Trang</strong> · Dữ liệu đồng bộ với Google Sheet.</p><div><button onClick={closeDay}>Chốt ngày & xuất PDF</button><button className="danger" onClick={clearDay}>Xóa dữ liệu ngày</button></div></footer>
 
       {showForm && <div className="modal" onMouseDown={() => setShowForm(false)}>
         <form onSubmit={addTask} onMouseDown={(e) => e.stopPropagation()}>

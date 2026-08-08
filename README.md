@@ -11,6 +11,7 @@ Website quản lý công việc hằng ngày dành cho Bác sĩ – Leader Trang
 - Quản lý trọng tâm trong tuần.
 - Tạo, hoàn thành, kéo thả và xoá công việc.
 - Xuất báo cáo công việc ngày thành PDF bằng chức năng in của trình duyệt.
+- Đồng bộ dữ liệu giữa máy tính và điện thoại qua Google Sheet.
 - Có sẵn dữ liệu giả lập để trình diễn.
 
 ## Chạy trên máy tính
@@ -45,9 +46,9 @@ git push -u origin main
 1. Đăng nhập Vercel.
 2. Chọn **Add New Project**.
 3. Import repository GitHub vừa tạo.
-4. Giữ nguyên cấu hình Next.js mặc định.
-5. Chọn **Deploy**.
+4. Trong **Environment Variables**, thêm `GOOGLE_SCRIPT_URL` và dán URL Web App Apps Script kết thúc bằng `/exec`.
+5. Giữ nguyên cấu hình Next.js mặc định và chọn **Deploy**.
 
 ## Lưu ý về dữ liệu
 
-Phiên bản hiện tại lưu dữ liệu bằng `localStorage`, vì vậy dữ liệu chỉ tồn tại trên từng trình duyệt. Google Sheet đã chuẩn bị riêng nhưng chưa được kết nối. Khi có URL Apps Script API, thay lớp lưu dữ liệu trình duyệt bằng API để máy tính và điện thoại dùng chung dữ liệu.
+Website đã kết nối Google Sheet thông qua Apps Script. Các thao tác tạo, hoàn thành, xoá, kéo thả phân loại và chốt ngày đều được đồng bộ. URL đang có sẵn trong mã làm giá trị dự phòng; khi triển khai thật nên khai báo biến `GOOGLE_SCRIPT_URL` trên Vercel để dễ thay đổi về sau.
