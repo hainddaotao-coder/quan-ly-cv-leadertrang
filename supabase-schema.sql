@@ -2,7 +2,6 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
   title text not null check (char_length(trim(title)) > 0),
   note text not null default '',
   category text not null default 'routine' check (category in ('urgent','important','routine','week','cases')),
@@ -15,22 +14,36 @@ create table if not exists public.tasks (
   archived_at timestamptz
 );
 
-create index if not exists tasks_user_status_idx on public.tasks (user_id, status);
-create index if not exists tasks_user_category_idx on public.tasks (user_id, category);
-create index if not exists tasks_user_date_idx on public.tasks (user_id, task_date);
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'tasks' and column_name = 'user_id'
+  ) then
+    alter table public.tasks alter column user_id drop not null;
+  end if;
+end $$;
+
+create index if not exists tasks_status_idx on public.tasks (status);
+create index if not exists tasks_category_idx on public.tasks (category);
+create index if not exists tasks_date_idx on public.tasks (task_date);
 
 alter table public.tasks enable row level security;
-grant select, insert, update, delete on public.tasks to authenticated;
-revoke all on public.tasks from anon;
+grant select, insert, update, delete on public.tasks to anon, authenticated;
 
 drop policy if exists "Users can read own tasks" on public.tasks;
-create policy "Users can read own tasks" on public.tasks for select to authenticated using ((select auth.uid()) = user_id);
 drop policy if exists "Users can create own tasks" on public.tasks;
-create policy "Users can create own tasks" on public.tasks for insert to authenticated with check ((select auth.uid()) = user_id);
 drop policy if exists "Users can update own tasks" on public.tasks;
-create policy "Users can update own tasks" on public.tasks for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 drop policy if exists "Users can delete own tasks" on public.tasks;
-create policy "Users can delete own tasks" on public.tasks for delete to authenticated using ((select auth.uid()) = user_id);
+drop policy if exists "Public can read tasks" on public.tasks;
+drop policy if exists "Public can create tasks" on public.tasks;
+drop policy if exists "Public can update tasks" on public.tasks;
+drop policy if exists "Public can delete tasks" on public.tasks;
+
+create policy "Public can read tasks" on public.tasks for select to anon, authenticated using (true);
+create policy "Public can create tasks" on public.tasks for insert to anon, authenticated with check (true);
+create policy "Public can update tasks" on public.tasks for update to anon, authenticated using (true) with check (true);
+create policy "Public can delete tasks" on public.tasks for delete to anon, authenticated using (true);
 
 create or replace function public.set_task_updated_at()
 returns trigger language plpgsql security invoker set search_path = '' as $$
