@@ -1,56 +1,67 @@
-# PKC Task Manager
+# PKC Task Manager · Supabase + ChatGPT MCP
 
-Website quản lý công việc hằng ngày dành cho Bác sĩ – Leader Trang tại PKC Pet Center, sử dụng Supabase và không yêu cầu đăng nhập.
+Website quản lý công việc dành cho **Bác sĩ – Leader Trang** tại PKC Pet Center. Website không yêu cầu đăng nhập, đồng bộ dữ liệu bằng Supabase và có MCP server để ChatGPT đọc/điều khiển công việc.
 
 ## Chức năng
 
-- Quản lý việc gấp – quan trọng.
-- Quản lý việc quan trọng – chưa gấp.
-- Quản lý công việc thường xuyên.
-- Theo dõi các ca bệnh trong ngày.
-- Quản lý trọng tâm trong tuần.
-- Tạo, hoàn thành, kéo thả và xoá công việc.
+- Quản lý việc gấp, việc quan trọng, việc thường xuyên, trọng tâm tuần và ca bệnh cần theo dõi.
+- Tạo, hoàn thành, kéo thả, xoá/lưu trữ công việc.
 - Xuất báo cáo ngày thành PDF.
-- Đồng bộ dữ liệu nhanh giữa máy tính và điện thoại qua Supabase.
-- Mở website và sử dụng ngay, không cần tài khoản hoặc mật khẩu.
-- Có sẵn dữ liệu giả lập để trình diễn.
+- Đồng bộ máy tính và điện thoại qua Supabase.
+- MCP tại `/api/mcp` cho phép ChatGPT xem, tạo, sửa, hoàn thành, di chuyển và lưu trữ công việc.
 
-## 1. Chuẩn bị Supabase
+## 1. Supabase
 
-Mở **SQL Editor** của Supabase, sao chép toàn bộ file `supabase-schema.sql` và nhấn **Run**.
+Nếu chưa chạy schema, mở **Supabase → SQL Editor**, sao chép toàn bộ `supabase-schema.sql` và nhấn **Run**. Script giữ lại dữ liệu đang có.
+
+Lấy Secret key tại **Supabase → Project Settings → API Keys → Secret keys**. Không gửi key này qua chat và không đưa vào GitHub.
 
 ## 2. Chạy trên máy tính
 
 Yêu cầu Node.js 20.9 trở lên.
 
 ```bash
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-Mở `http://localhost:3000`.
+Điền `SUPABASE_SECRET_KEY` và `PKC_MCP_TOKEN` vào `.env.local`, rồi mở `http://localhost:3000`.
 
-## 3. Đưa lên GitHub
+## 3. Đưa lên GitHub và Vercel
 
-Thay toàn bộ mã nguồn cũ bằng nội dung trong thư mục này. `package.json` phải nằm ở thư mục gốc của repository.
+Đưa toàn bộ nội dung thư mục lên repository, bảo đảm `package.json` ở thư mục gốc.
 
-```bash
-git add .
-git commit -m "Switch PKC task manager to public Supabase access"
-git push
-```
-
-## 4. Cấu hình Vercel
-
-Thêm hai Environment Variables:
+Trong **Vercel → Project → Settings → Environment Variables**, thêm đủ bốn biến:
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+SUPABASE_SECRET_KEY
+PKC_MCP_TOKEN
 ```
 
-Giá trị mẫu nằm trong `.env.example`. Xóa biến `GOOGLE_SCRIPT_URL` cũ nếu còn, sau đó Redeploy.
+Sau đó **Redeploy**. Không đặt tiền tố `NEXT_PUBLIC_` cho secret key hoặc MCP token.
+
+## 4. Kết nối ChatGPT
+
+Sau khi Vercel chạy thành công, MCP endpoint là:
+
+```text
+https://TEN-MIEN-VERCEL-CUA-BAN.vercel.app/api/mcp
+```
+
+- Nếu giao diện tạo app hỗ trợ **Bearer token**, dùng endpoint trên và nhập giá trị `PKC_MCP_TOKEN` làm token.
+- Nếu chỉ có **No authentication**, dùng URL `https://TEN-MIEN-VERCEL-CUA-BAN.vercel.app/api/mcp?token=GIA-TRI-PKC_MCP_TOKEN`.
+- Vào **ChatGPT → Settings → Apps → Advanced settings**, bật Developer mode; sau đó **Apps → Create**, nhập endpoint và chọn **Scan tools**.
+
+Các câu lệnh mẫu:
+
+- “Liệt kê các việc gấp chưa hoàn thành hôm nay.”
+- “Tạo ca bệnh cần theo dõi: Mèo Bông, kiểm tra nhiệt độ lúc 15:00.”
+- “Đánh dấu công việc kiểm tra lịch trực là hoàn thành.”
+- “Tóm tắt tiến độ công việc hôm nay.”
 
 ## Lưu ý bảo mật
 
-Website không có đăng nhập. Bất kỳ ai có đường dẫn đều có thể xem và thay đổi dữ liệu; chỉ nên chia sẻ đường dẫn trong nội bộ.
+MCP endpoint được bảo vệ bằng `PKC_MCP_TOKEN`, nhưng website hiện không có đăng nhập. Bất kỳ ai có đường dẫn website vẫn có thể xem và thay đổi dữ liệu. Chỉ chia sẻ đường dẫn trong nội bộ và không lưu thông tin y tế nhạy cảm có thể nhận diện chủ nuôi.
