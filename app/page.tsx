@@ -1,6 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
 type Category = "urgent" | "important" | "routine" | "week" | "cases";
 type Task = {
@@ -11,6 +14,24 @@ type Task = {
   done: boolean;
   createdAt: string;
 };
+
+type TaskRow = {
+  id: string;
+  title: string;
+  note: string;
+  category: Category;
+  done: boolean;
+  created_at: string;
+};
+
+const rowToTask = (row: TaskRow): Task => ({
+  id: row.id,
+  title: row.title,
+  note: row.note,
+  category: row.category,
+  done: row.done,
+  createdAt: row.created_at,
+});
 
 const sampleTasks: Task[] = [
   { id:"u1", title:"Xử lý ca cấp cứu chó Mít", note:"Khó thở, theo dõi SpO₂ và đáp ứng oxy", category:"urgent", done:false, createdAt:"sample" },
@@ -66,6 +87,10 @@ function TaskCard({ task, onToggle, onDelete, onDragStart }: {
 }
 
 export default function Home() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [email, setEmail] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -76,37 +101,48 @@ export default function Home() {
   const [note, setNote] = useState("");
   const [category, setCategory] = useState<Category>("urgent");
 
-  async function loadTasks() {
+  const loadTasks = useCallback(async () => {
     try {
       setError("");
-      const response = await fetch("/api/tasks", { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok || data.success === false) throw new Error(data.error || "Không thể tải công việc.");
-      setTasks(Array.isArray(data.tasks) ? data.tasks : []);
+      const { data, error: queryError } = await supabase
+        .from("tasks")
+        .select("id,title,note,category,done,created_at")
+        .eq("status", "active")
+        .order("created_at", { ascending: true });
+      if (queryError) throw queryError;
+      setTasks(((data || []) as TaskRow[]).map(rowToTask));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Không thể tải công việc.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { void loadTasks(); }, []);
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthReady(true);
+      if (data.session) void loadTasks();
+      else setLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthReady(true);
+      if (nextSession) { setLoading(true); void loadTasks(); }
+      else { setTasks([]); setLoading(false); }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, [loadTasks]);
 
-  async function sync(payload: Record<string, unknown>) {
-    setSyncing(true);
-    setError("");
-    try {
-      const response = await fetch("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const data = await response.json();
-      if (!response.ok || data.success === false) throw new Error(data.error || "Không thể đồng bộ dữ liệu.");
-      await loadTasks();
-      return true;
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Không thể đồng bộ dữ liệu.");
-      return false;
-    } finally {
-      setSyncing(false);
-    }
+  async function signIn(event: FormEvent) {
+    event.preventDefault();
+    setSyncing(true); setError("");
+    const { error: authError } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (authError) setError(authError.message); else setEmailSent(true);
+    setSyncing(false);
   }
 
   const dailyTasks = tasks.filter((task) => task.category !== "week");
@@ -119,25 +155,43 @@ export default function Home() {
 
   async function addTask(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim()) return;
-    const saved = await sync({ action: "create", title: title.trim(), note: note.trim(), category });
-    if (saved) { setTitle(""); setNote(""); setShowForm(false); }
+    if (!title.trim() || !session) return;
+    setSyncing(true); setError("");
+    const temporaryId = crypto.randomUUID();
+    const optimistic: Task = { id: temporaryId, title: title.trim(), note: note.trim(), category, done: false, createdAt: new Date().toISOString() };
+    setTasks((current) => [...current, optimistic]);
+    setTitle(""); setNote(""); setShowForm(false);
+    const { data, error: insertError } = await supabase.from("tasks").insert({ user_id: session.user.id, title: optimistic.title, note: optimistic.note, category, done: false, owner: "Bác sĩ Trang" }).select("id,title,note,category,done,created_at").single();
+    if (insertError) { setTasks((current) => current.filter((task) => task.id !== temporaryId)); setError(insertError.message); }
+    else setTasks((current) => current.map((task) => task.id === temporaryId ? rowToTask(data as TaskRow) : task));
+    setSyncing(false);
   }
 
   async function toggleTask(id: string) {
     const task = tasks.find((item) => item.id === id);
-    if (task) await sync({ action: "update", id, done: !task.done });
+    if (!task) return;
+    const nextDone = !task.done;
+    setTasks((current) => current.map((item) => item.id === id ? { ...item, done: nextDone } : item));
+    const { error: updateError } = await supabase.from("tasks").update({ done: nextDone }).eq("id", id);
+    if (updateError) { setTasks((current) => current.map((item) => item.id === id ? task : item)); setError(updateError.message); }
   }
 
   async function deleteTask(id: string) {
-    if (confirm("Xóa công việc này?")) await sync({ action: "delete", id });
+    if (!confirm("Xóa công việc này?")) return;
+    const previous = tasks;
+    setTasks((current) => current.filter((task) => task.id !== id));
+    const { error: deleteError } = await supabase.from("tasks").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", id);
+    if (deleteError) { setTasks(previous); setError(deleteError.message); }
   }
 
   async function moveTask(target: Category) {
     if (!draggedId) return;
     const id = draggedId;
+    const previous = tasks;
     setDraggedId(null);
-    await sync({ action: "update", id, category: target });
+    setTasks((current) => current.map((task) => task.id === id ? { ...task, category: target } : task));
+    const { error: moveError } = await supabase.from("tasks").update({ category: target }).eq("id", id);
+    if (moveError) { setTasks(previous); setError(moveError.message); }
   }
 
   function closeDay() {
@@ -148,19 +202,47 @@ export default function Home() {
 
   async function clearDay() {
     if (confirm("Chỉ thực hiện sau khi anh đã lưu PDF. Xóa toàn bộ công việc trong ngày? Các việc trong tuần vẫn được giữ lại.")) {
-      await sync({ action: "archiveDay" });
+      setSyncing(true);
+      const { error: archiveError } = await supabase.from("tasks").update({ status: "archived", archived_at: new Date().toISOString() }).eq("status", "active").neq("category", "week");
+      if (archiveError) setError(archiveError.message); else setTasks((current) => current.filter((task) => task.category === "week"));
+      setSyncing(false);
     }
   }
 
   async function loadSampleData() {
-    if (confirm("Nạp lại toàn bộ dữ liệu mẫu? Dữ liệu hiện tại sẽ được thay thế.")) await sync({ action: "resetSample" });
+    if (!session || !confirm("Nạp lại toàn bộ dữ liệu mẫu? Dữ liệu hiện tại sẽ được thay thế.")) return;
+    setSyncing(true); setError("");
+    const now = new Date().toISOString();
+    const { error: archiveError } = await supabase.from("tasks").update({ status: "archived", archived_at: now }).eq("status", "active");
+    const rows = sampleTasks.map(({ title, note, category, done }) => ({ user_id: session.user.id, title, note, category, done, owner: "Bác sĩ Trang" }));
+    const { error: insertError } = archiveError ? { error: archiveError } : await supabase.from("tasks").insert(rows);
+    if (insertError) setError(insertError.message); else await loadTasks();
+    setSyncing(false);
   }
+
+  if (!authReady) return <main className="auth-page"><p>Đang khởi động…</p></main>;
+
+  if (!session) return <main className="auth-page">
+    <section className="auth-card">
+      <Image src="/pkc-logo.png" alt="PKC Pet Center" width={110} height={72} priority />
+      <p className="eyebrow">PKC PET CENTER</p>
+      <h1>Quản lý công việc<br/>Bác sĩ – Leader Trang</h1>
+      <p>Đăng nhập bằng email để sử dụng chung dữ liệu trên máy tính và điện thoại.</p>
+      <form onSubmit={signIn}>
+        <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="email@example.com" required /></label>
+        <button className="primary" disabled={syncing}>{syncing ? "Đang gửi…" : "Gửi đường dẫn đăng nhập"}</button>
+      </form>
+      {emailSent && <div className="auth-success">Đã gửi. Hãy mở email và bấm đường dẫn đăng nhập.</div>}
+      {error && <div className="auth-error">{error}</div>}
+    </section>
+  </main>;
 
   return (
     <main>
       <header className="topbar">
-        <div className="brand"><span className="brand-mark"><img src="/pkc-logo.png" alt="PKC Pet Center" /></span><div><strong>PKC PET CENTER</strong><small>Quản lý công việc cá nhân</small></div></div>
+        <div className="brand"><span className="brand-mark"><Image src="/pkc-logo.png" alt="PKC Pet Center" width={62} height={39} priority /></span><div><strong>PKC PET CENTER</strong><small>Quản lý công việc cá nhân</small></div></div>
         <div className="top-actions">
+          <button className="ghost" onClick={() => void supabase.auth.signOut()}>Đăng xuất</button>
           <button className="ghost demo-button" onClick={loadSampleData}>Dữ liệu mẫu</button>
           <button className="ghost" onClick={closeDay}>Xuất báo cáo PDF</button>
           <button className="primary" onClick={() => setShowForm(true)}>＋ Tạo công việc</button>
@@ -173,7 +255,7 @@ export default function Home() {
       </section>
 
       {(loading || syncing || error) && <section className={`sync-status ${error ? "has-error" : ""}`}>
-        <span>{loading ? "Đang tải dữ liệu từ Google Sheet…" : syncing ? "Đang đồng bộ Google Sheet…" : error}</span>
+        <span>{loading ? "Đang tải dữ liệu từ Supabase…" : syncing ? "Đang đồng bộ Supabase…" : error}</span>
         {error && <button onClick={() => void loadTasks()}>Thử lại</button>}
       </section>}
 
@@ -211,7 +293,7 @@ export default function Home() {
         </aside>
       </section>
 
-      <footer><p>Tài khoản sử dụng: <strong>Bác sĩ – Leader Trang</strong> · Dữ liệu đồng bộ với Google Sheet.</p><div><button onClick={closeDay}>Chốt ngày & xuất PDF</button><button className="danger" onClick={clearDay}>Xóa dữ liệu ngày</button></div></footer>
+      <footer><p>Tài khoản sử dụng: <strong>{session.user.email}</strong> · Dữ liệu đồng bộ với Supabase.</p><div><button onClick={closeDay}>Chốt ngày & xuất PDF</button><button className="danger" onClick={clearDay}>Xóa dữ liệu ngày</button></div></footer>
 
       {showForm && <div className="modal" onMouseDown={() => setShowForm(false)}>
         <form onSubmit={addTask} onMouseDown={(e) => e.stopPropagation()}>
@@ -224,7 +306,7 @@ export default function Home() {
       </div>}
 
       <section className="print-report">
-        <div className="print-brand"><img src="/pkc-logo.png" alt="PKC Pet Center"/><p>PKC PET CENTER</p></div><p className="eyebrow">BÁO CÁO CÔNG VIỆC NGÀY · BÁC SĨ – LEADER TRANG</p><h1>{todayLabel()}</h1>
+        <div className="print-brand"><Image src="/pkc-logo.png" alt="PKC Pet Center" width={80} height={52}/><p>PKC PET CENTER</p></div><p className="eyebrow">BÁO CÁO CÔNG VIỆC NGÀY · BÁC SĨ – LEADER TRANG</p><h1>{todayLabel()}</h1>
         <div className="print-stats"><span>Tổng số việc <strong>{dailyTasks.length}</strong></span><span>Hoàn thành <strong>{completed}</strong></span><span>Tỷ lệ <strong>{progress}%</strong></span></div>
         {columns.map((column) => <div className="print-group" key={column.key}><h2>{column.title}</h2>{grouped[column.key].length ? grouped[column.key].map((task) => <p key={task.id}><b>{task.done ? "✓" : "○"}</b> {task.title} {task.note && <small>— {task.note}</small>}</p>) : <p className="muted">Không có công việc</p>}</div>)}
         <div className="print-group"><h2>Các ca bệnh cần theo dõi</h2>{grouped.cases.map((task) => <p key={task.id}><b>{task.done ? "✓" : "○"}</b> {task.title} <small>— {task.note}</small></p>)}</div>
