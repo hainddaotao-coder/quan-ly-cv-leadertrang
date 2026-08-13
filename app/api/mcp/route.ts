@@ -6,11 +6,11 @@ export const dynamic = "force-dynamic";
 
 type JsonRpcId = string | number | null;
 type JsonRpcRequest = { jsonrpc?: string; id?: JsonRpcId; method?: string; params?: Record<string, unknown> };
-type Category = "urgent" | "important" | "routine" | "week" | "cases";
-const categories: Category[] = ["urgent", "important", "routine", "week", "cases"];
+type Category = "urgent" | "important" | "routine" | "week";
+const categories: Category[] = ["urgent", "important", "routine", "week"];
 const categoryLabels: Record<Category, string> = {
   urgent: "Gấp · Quan trọng", important: "Quan trọng · Chưa gấp", routine: "Việc thường xuyên",
-  week: "Cần hoàn thành trong tuần", cases: "Ca bệnh cần theo dõi",
+  week: "Cần hoàn thành trong tuần",
 };
 
 const toolDefinitions = [
@@ -22,6 +22,10 @@ const toolDefinitions = [
   { name: "move_task", title: "Di chuyển công việc PKC", description: "Di chuyển một công việc sang cột phân loại khác.", inputSchema: { type: "object", properties: { id: { type: "string", format: "uuid" }, category: { type: "string", enum: categories } }, required: ["id", "category"], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } },
   { name: "archive_task", title: "Xoá công việc PKC", description: "Đưa một công việc vào lưu trữ; công việc sẽ biến mất khỏi bảng chính.", inputSchema: { type: "object", properties: { id: { type: "string", format: "uuid" } }, required: ["id"], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
   { name: "archive_day", title: "Kết thúc ngày làm việc PKC", description: "Lưu trữ toàn bộ công việc trong ngày, ngoại trừ nhóm công việc trong tuần.", inputSchema: { type: "object", properties: { taskDate: { type: "string", format: "date", description: "Ngày dạng YYYY-MM-DD; mặc định hôm nay." } }, additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } },
+  { name: "list_medical_cases", title: "Xem ca bệnh PKC", description: "Liệt kê ca bệnh, có thể lọc theo cơ sở và Nội trú/Ngoại trú.", inputSchema: { type:"object", properties:{ facility:{type:"string"}, caseType:{type:"string",enum:["Nội trú","Ngoại trú"]}, includeArchived:{type:"boolean",default:false} }, additionalProperties:false }, annotations:{readOnlyHint:true,openWorldHint:false} },
+  { name: "create_medical_case", title: "Tạo ca bệnh PKC", description: "Tạo ca bệnh mới tại một cơ sở.", inputSchema:{type:"object",properties:{petName:{type:"string"},species:{type:"string"},breed:{type:"string"},ageText:{type:"string"},caseType:{type:"string",enum:["Nội trú","Ngoại trú"]},facility:{type:"string"},diagnosis:{type:"string"},monitoringNote:{type:"string"},ownerName:{type:"string"},ownerPhone:{type:"string"}},required:["petName","caseType","facility"],additionalProperties:false}, annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false} },
+  { name: "update_medical_case", title: "Sửa ca bệnh PKC", description: "Cập nhật thông tin hoặc trạng thái hoàn thành của ca bệnh.", inputSchema:{type:"object",properties:{id:{type:"string",format:"uuid"},diagnosis:{type:"string"},monitoringNote:{type:"string"},treatmentNote:{type:"string"},status:{type:"string"},isCompleted:{type:"boolean"},facility:{type:"string"},caseType:{type:"string",enum:["Nội trú","Ngoại trú"]}},required:["id"],additionalProperties:false}, annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false} },
+  { name: "archive_medical_case", title: "Xóa ca bệnh PKC", description: "Đưa ca bệnh vào lưu trữ.", inputSchema:{type:"object",properties:{id:{type:"string",format:"uuid"}},required:["id"],additionalProperties:false}, annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true,openWorldHint:false} },
 ];
 
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, MCP-Protocol-Version", "Access-Control-Expose-Headers": "MCP-Protocol-Version" };
@@ -40,6 +44,27 @@ function assertCategory(value: unknown): Category | undefined { if (value === un
 
 async function runTool(name: string, args: Record<string, unknown>) {
   const supabase = getSupabaseAdmin();
+  if (name === "list_medical_cases") {
+    let query = supabase.from("medical_cases").select("*");
+    if (!args.includeArchived) query = query.eq("record_status", "active");
+    if (args.facility) query = query.eq("facility", String(args.facility));
+    if (args.caseType) query = query.eq("case_type", String(args.caseType));
+    const { data, error } = await query.order("created_at").limit(200); if (error) throw error;
+    return textResult({ success:true, count:data.length, medicalCases:data });
+  }
+  if (name === "create_medical_case") {
+    const payload = { pet_name:String(args.petName||"").trim(), species:String(args.species||"").trim(), breed:String(args.breed||"").trim(), age_text:String(args.ageText||"").trim(), case_type:String(args.caseType), facility:String(args.facility), diagnosis:String(args.diagnosis||"").trim(), monitoring_note:String(args.monitoringNote||"").trim(), owner_name:String(args.ownerName||"").trim(), owner_phone:String(args.ownerPhone||"").trim(), doctor_name:"Bác sĩ Trang", case_date:today() };
+    if (!payload.pet_name) throw new Error("Tên thú cưng không được để trống.");
+    const {data,error}=await supabase.from("medical_cases").insert(payload).select().single();if(error)throw error;return textResult({success:true,message:"Đã tạo ca bệnh.",medicalCase:data});
+  }
+  if (name === "update_medical_case") {
+    const map:Record<string,string>={diagnosis:"diagnosis",monitoringNote:"monitoring_note",treatmentNote:"treatment_note",status:"status",isCompleted:"is_completed",facility:"facility",caseType:"case_type"}, update:Record<string,unknown>={};
+    Object.entries(map).forEach(([a,b])=>{if(args[a]!==undefined)update[b]=args[a]}); if(!Object.keys(update).length)throw new Error("Chưa có nội dung cần cập nhật.");
+    const {data,error}=await supabase.from("medical_cases").update(update).eq("id",String(args.id)).eq("record_status","active").select().maybeSingle();if(error)throw error;if(!data)throw new Error("Không tìm thấy ca bệnh.");return textResult({success:true,message:"Đã cập nhật ca bệnh.",medicalCase:data});
+  }
+  if (name === "archive_medical_case") {
+    const {data,error}=await supabase.from("medical_cases").update({record_status:"archived",archived_at:new Date().toISOString()}).eq("id",String(args.id)).eq("record_status","active").select().maybeSingle();if(error)throw error;if(!data)throw new Error("Không tìm thấy ca bệnh.");return textResult({success:true,message:"Đã lưu trữ ca bệnh.",medicalCase:data});
+  }
   if (name === "list_tasks") {
     let query = supabase.from("tasks").select("id,title,note,category,done,task_date,status,owner,created_at,updated_at,archived_at");
     if (!args.includeArchived) query = query.eq("status", "active");

@@ -4,15 +4,16 @@ Website quản lý công việc dành cho **Bác sĩ – Leader Trang** tại PK
 
 ## Chức năng
 
-- Quản lý việc gấp, việc quan trọng, việc thường xuyên, trọng tâm tuần và ca bệnh cần theo dõi.
-- Tạo, hoàn thành, kéo thả, xoá/lưu trữ công việc.
+- Bốn cột công việc bằng nhau: việc gấp, việc quan trọng, việc thường xuyên và trọng tâm tuần.
+- Ca bệnh tách riêng theo 5 cơ sở, phân biệt rõ Nội trú/Ngoại trú bằng màu sắc.
+- Tạo, xem chi tiết, sửa, hoàn thành và xoá/lưu trữ công việc lẫn ca bệnh.
 - Xuất báo cáo ngày thành PDF.
 - Đồng bộ máy tính và điện thoại qua Supabase.
-- MCP tại `/api/mcp` cho phép ChatGPT xem, tạo, sửa, hoàn thành, di chuyển và lưu trữ công việc.
+- MCP tại `/api/mcp` cho phép ChatGPT xem, tạo, sửa và lưu trữ cả công việc lẫn ca bệnh.
 
 ## 1. Supabase
 
-Nếu chưa chạy schema, mở **Supabase → SQL Editor**, sao chép toàn bộ `supabase-schema.sql` và nhấn **Run**. Script giữ lại dữ liệu đang có.
+Chạy `supabase-schema.sql` cho bảng công việc và file SQL ca bệnh đã cung cấp cho bảng `medical_cases`.
 
 Lấy Secret key tại **Supabase → Project Settings → API Keys → Secret keys**. Không gửi key này qua chat và không đưa vào GitHub.
 

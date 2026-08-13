@@ -4,268 +4,50 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
-type Category = "urgent" | "important" | "routine" | "week" | "cases";
-type Task = {
-  id: string;
-  title: string;
-  note: string;
-  category: Category;
-  done: boolean;
-  createdAt: string;
-};
+type Category = "urgent" | "important" | "routine" | "week";
+type Facility = "PKC 1 - Trâu Quỳ" | "PKC 2 - Ecopark" | "PKC 3 - Đa Tốn" | "CityFarm" | "Trại Ngựa";
+type CaseType = "Nội trú" | "Ngoại trú";
+type Task = { id:string; title:string; note:string; category:Category; done:boolean; created_at:string };
+type MedicalCase = { id:string; pet_name:string; species:string; breed:string; age_text:string; owner_name:string; owner_phone:string; case_type:CaseType; facility:Facility; diagnosis:string; monitoring_note:string; treatment_note:string; doctor_name:string; status:string; is_completed:boolean; case_date:string; admission_at:string|null; discharge_at:string|null; created_at:string };
 
-type TaskRow = {
-  id: string;
-  title: string;
-  note: string;
-  category: Category;
-  done: boolean;
-  created_at: string;
-};
-
-const rowToTask = (row: TaskRow): Task => ({
-  id: row.id,
-  title: row.title,
-  note: row.note,
-  category: row.category,
-  done: row.done,
-  createdAt: row.created_at,
-});
-
-const sampleTasks: Task[] = [
-  { id:"u1", title:"Xử lý ca cấp cứu chó Mít", note:"Khó thở, theo dõi SpO₂ và đáp ứng oxy", category:"urgent", done:false, createdAt:"sample" },
-  { id:"u2", title:"Duyệt phác đồ điều trị nội trú", note:"Hoàn tất trước 10:00", category:"urgent", done:true, createdAt:"sample" },
-  { id:"u3", title:"Phản hồi chủ nuôi mèo Bông", note:"Kết quả xét nghiệm chức năng thận", category:"urgent", done:false, createdAt:"sample" },
-  { id:"u4", title:"Kiểm tra lịch trực bác sĩ", note:"Điều chỉnh ca trực tối nay", category:"urgent", done:false, createdAt:"sample" },
-  { id:"i1", title:"Hoàn thiện quy trình tiếp nhận", note:"Chuẩn hóa luồng khám và nhập viện", category:"important", done:false, createdAt:"sample" },
-  { id:"i2", title:"Đánh giá năng lực kỹ thuật viên", note:"Ghi nhận kết quả thực hành tháng này", category:"important", done:false, createdAt:"sample" },
-  { id:"i3", title:"Xây dựng danh mục thuốc thiết yếu", note:"Rà soát tồn kho và mức cảnh báo", category:"important", done:false, createdAt:"sample" },
-  { id:"i4", title:"Chuẩn bị nội dung đào tạo nội bộ", note:"Chủ đề: xử trí phản vệ ở thú cưng", category:"important", done:false, createdAt:"sample" },
-  { id:"r1", title:"Họp giao ban đầu ngày", note:"08:15 · cập nhật ca nội trú", category:"routine", done:true, createdAt:"sample" },
-  { id:"r2", title:"Kiểm tra sổ bàn giao thuốc", note:"Đối chiếu số lượng và chữ ký", category:"routine", done:false, createdAt:"sample" },
-  { id:"r3", title:"Duyệt hồ sơ bệnh án trong ngày", note:"Bổ sung các trường còn thiếu", category:"routine", done:false, createdAt:"sample" },
-  { id:"r4", title:"Cập nhật nhóm vận hành PKC", note:"Tiến độ, khó khăn và đề xuất hỗ trợ", category:"routine", done:false, createdAt:"sample" },
-  { id:"w1", title:"Chốt lịch đào tạo chuyên môn", note:"Thứ Sáu · toàn bộ đội ngũ y khoa", category:"week", done:false, createdAt:"sample" },
-  { id:"w2", title:"Hoàn tất báo cáo thuốc và vật tư", note:"Hạn hoàn thành: Thứ Năm", category:"week", done:false, createdAt:"sample" },
-  { id:"w3", title:"Rà soát chất lượng bệnh án", note:"Chọn ngẫu nhiên 10 hồ sơ", category:"week", done:false, createdAt:"sample" },
-  { id:"w4", title:"Lập kế hoạch nhân sự tuần tới", note:"Ca trực, nghỉ phép và hỗ trợ chuyên môn", category:"week", done:false, createdAt:"sample" },
-  { id:"c1", title:"Chó Mít · Poodle · 4 tuổi", note:"Viêm phổi · đo SpO₂ lúc 10:00 và 15:00", category:"cases", done:false, createdAt:"sample" },
-  { id:"c2", title:"Mèo Bông · Anh lông ngắn · 7 tuổi", note:"Suy thận độ II · theo dõi ăn uống và nước tiểu", category:"cases", done:false, createdAt:"sample" },
-  { id:"c3", title:"Chó Đậu · Corgi · 2 tuổi", note:"Hậu phẫu triệt sản · kiểm tra vết mổ lúc 14:00", category:"cases", done:true, createdAt:"sample" },
-  { id:"c4", title:"Mèo Mun · Mèo ta · 3 tháng", note:"Giảm bạch cầu · theo dõi nhiệt độ mỗi 4 giờ", category:"cases", done:false, createdAt:"sample" },
-  { id:"c5", title:"Chó Lucky · Golden · 8 tuổi", note:"Tim mạch · đánh giá đáp ứng thuốc lợi tiểu", category:"cases", done:false, createdAt:"sample" },
+const categories: {key:Category; title:string; subtitle:string; tone:string}[] = [
+  {key:"urgent",title:"Gấp · Quan trọng",subtitle:"Ưu tiên hoàn thành sớm",tone:"coral"},
+  {key:"important",title:"Quan trọng · Chưa gấp",subtitle:"Chủ động dành thời gian",tone:"amber"},
+  {key:"routine",title:"Việc thường xuyên",subtitle:"Duy trì đều đặn mỗi ngày",tone:"sage"},
+  {key:"week",title:"Trọng tâm tuần",subtitle:"Việc cần hoàn thành trong tuần",tone:"dark"},
 ];
+const facilities: Facility[] = ["PKC 1 - Trâu Quỳ","PKC 2 - Ecopark","PKC 3 - Đa Tốn","CityFarm","Trại Ngựa"];
+const blankCase = (facility:Facility=facilities[0]): Omit<MedicalCase,"id"|"created_at"> => ({pet_name:"",species:"",breed:"",age_text:"",owner_name:"",owner_phone:"",case_type:"Nội trú",facility,diagnosis:"",monitoring_note:"",treatment_note:"",doctor_name:"Bác sĩ Trang",status:"Đang theo dõi",is_completed:false,case_date:new Date().toLocaleDateString("en-CA"),admission_at:null,discharge_at:null});
+const todayLabel = () => new Intl.DateTimeFormat("vi-VN",{weekday:"long",day:"2-digit",month:"long",year:"numeric"}).format(new Date());
 
-const columns: { key: Exclude<Category, "week">; title: string; subtitle: string; tone: string }[] = [
-  { key: "urgent", title: "Gấp · Quan trọng", subtitle: "Ưu tiên hoàn thành sớm", tone: "coral" },
-  { key: "important", title: "Quan trọng · Chưa gấp", subtitle: "Chủ động dành thời gian", tone: "amber" },
-  { key: "routine", title: "Việc thường xuyên", subtitle: "Duy trì đều đặn mỗi ngày", tone: "sage" },
-];
+export default function Home(){
+  const [tasks,setTasks]=useState<Task[]>([]), [cases,setCases]=useState<MedicalCase[]>([]);
+  const [busy,setBusy]=useState(true), [error,setError]=useState("");
+  const [taskModal,setTaskModal]=useState<{category:Category; task?:Task}|null>(null);
+  const [caseModal,setCaseModal]=useState<{mode:"add"|"edit"|"detail"; data:MedicalCase|Omit<MedicalCase,"id"|"created_at">}|null>(null);
+  const loadData=useCallback(async()=>{setBusy(true);setError("");const [{data:t,error:te},{data:c,error:ce}]=await Promise.all([supabase.from("tasks").select("id,title,note,category,done,created_at").eq("status","active").in("category",["urgent","important","routine","week"]).order("created_at"),supabase.from("medical_cases").select("*").eq("record_status","active").order("created_at")]);if(te||ce)setError((te||ce)?.message||"Không thể tải dữ liệu.");else{setTasks((t||[]) as Task[]);setCases((c||[]) as MedicalCase[])}setBusy(false)},[]);
+  useEffect(()=>{const timer=window.setTimeout(()=>void loadData(),0);return()=>window.clearTimeout(timer)},[loadData]);
+  const grouped=useMemo(()=>Object.fromEntries(categories.map(x=>[x.key,tasks.filter(t=>t.category===x.key)])) as Record<Category,Task[]>,[tasks]);
+  const total=tasks.length+cases.length, completed=tasks.filter(t=>t.done).length+cases.filter(c=>c.is_completed).length, progress=total?Math.round(completed/total*100):0;
 
-const todayLabel = () =>
-  new Intl.DateTimeFormat("vi-VN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).format(new Date());
+  async function saveTask(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!taskModal)return;setBusy(true);const fd=new FormData(e.currentTarget),payload={title:String(fd.get("title")||"").trim(),note:String(fd.get("note")||"").trim(),category:String(fd.get("category")) as Category,owner:"Bác sĩ Trang"};const q=taskModal.task?supabase.from("tasks").update(payload).eq("id",taskModal.task.id):supabase.from("tasks").insert({...payload,done:false});const {error:e2}=await q;if(e2)setError(e2.message);else{setTaskModal(null);await loadData()}setBusy(false)}
+  async function toggleTask(t:Task){setTasks(x=>x.map(v=>v.id===t.id?{...v,done:!v.done}:v));const {error:e}=await supabase.from("tasks").update({done:!t.done}).eq("id",t.id);if(e){setError(e.message);void loadData()}}
+  async function deleteTask(t:Task){if(!confirm(`Xóa công việc “${t.title}”?`))return;const {error:e}=await supabase.from("tasks").update({status:"archived",archived_at:new Date().toISOString()}).eq("id",t.id);if(e)setError(e.message);else setTasks(x=>x.filter(v=>v.id!==t.id))}
+  async function saveCase(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!caseModal||caseModal.mode==="detail")return;setBusy(true);const fd=new FormData(e.currentTarget),payload={pet_name:String(fd.get("pet_name")||"").trim(),species:String(fd.get("species")||"").trim(),breed:String(fd.get("breed")||"").trim(),age_text:String(fd.get("age_text")||"").trim(),owner_name:String(fd.get("owner_name")||"").trim(),owner_phone:String(fd.get("owner_phone")||"").trim(),case_type:String(fd.get("case_type")) as CaseType,facility:String(fd.get("facility")) as Facility,diagnosis:String(fd.get("diagnosis")||"").trim(),monitoring_note:String(fd.get("monitoring_note")||"").trim(),treatment_note:String(fd.get("treatment_note")||"").trim(),doctor_name:String(fd.get("doctor_name")||"Bác sĩ Trang").trim(),status:String(fd.get("status")||"Đang theo dõi").trim(),case_date:String(fd.get("case_date")),is_completed:Boolean(fd.get("is_completed"))};const old=caseModal.data as MedicalCase,q=caseModal.mode==="edit"?supabase.from("medical_cases").update(payload).eq("id",old.id):supabase.from("medical_cases").insert(payload);const {error:e2}=await q;if(e2)setError(e2.message);else{setCaseModal(null);await loadData()}setBusy(false)}
+  async function toggleCase(c:MedicalCase){setCases(x=>x.map(v=>v.id===c.id?{...v,is_completed:!v.is_completed}:v));const {error:e}=await supabase.from("medical_cases").update({is_completed:!c.is_completed}).eq("id",c.id);if(e){setError(e.message);void loadData()}}
+  async function deleteCase(c:MedicalCase){if(!confirm(`Xóa ca bệnh của ${c.pet_name}?`))return;const {error:e}=await supabase.from("medical_cases").update({record_status:"archived",archived_at:new Date().toISOString()}).eq("id",c.id);if(e)setError(e.message);else setCases(x=>x.filter(v=>v.id!==c.id))}
 
-function TaskCard({ task, onToggle, onDelete, onDragStart }: {
-  task: Task;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
-  onDragStart: (id: string) => void;
-}) {
-  return (
-    <article className={`task-card ${task.done ? "is-done" : ""}`} draggable onDragStart={() => onDragStart(task.id)}>
-      <button className="check" onClick={() => onToggle(task.id)} aria-label={task.done ? "Đánh dấu chưa hoàn thành" : "Đánh dấu hoàn thành"}>
-        {task.done ? "✓" : ""}
-      </button>
-      <div className="task-copy">
-        <p>{task.title}</p>
-        {task.note && <span>{task.note}</span>}
-      </div>
-      <button className="delete" onClick={() => onDelete(task.id)} aria-label="Xóa công việc">×</button>
-    </article>
-  );
+  return <main><header className="topbar"><div className="brand"><span><Image src="/pkc-logo.png" alt="PKC" width={64} height={42}/></span><div><strong>PKC PET CENTER</strong><small>Quản lý công việc cá nhân</small></div></div><div className="top-actions"><button className="ghost" onClick={()=>window.print()}>Xuất PDF</button><button className="primary" onClick={()=>setTaskModal({category:"urgent"})}>＋ Tạo công việc</button></div></header>
+    <section className="welcome"><div><p className="eyebrow">{todayLabel()}</p><h1>Chào Bác sĩ Trang, <em>sẵn sàng cho một ngày hiệu quả.</em></h1></div><div className="progress-card"><div><span>Tiến độ hôm nay</span><strong>{completed}/{total}</strong></div><div className="progress"><i style={{width:`${progress}%`}}/></div><small>{progress}% hoàn thành</small></div></section>
+    {(busy||error)&&<div className={`notice ${error?"error":""}`}>{busy?"Đang đồng bộ dữ liệu với Supabase…":error}<button onClick={()=>void loadData()}>Tải lại</button></div>}
+    <section className="work-section"><div className="section-title"><div><p className="eyebrow">KẾ HOẠCH CÔNG VIỆC</p><h2>Các việc quan trọng & kế hoạch tuần</h2></div></div><div className="work-grid">{categories.map(col=><section className={`column ${col.tone}`} key={col.key}><header><div><h3>{col.title}</h3><p>{col.subtitle}</p></div><b>{grouped[col.key].length}</b></header><div className="task-list">{grouped[col.key].map(t=><article className={`task-card ${t.done?"done":""}`} key={t.id}><button className="check" onClick={()=>void toggleTask(t)}>{t.done?"✓":""}</button><div><strong>{t.title}</strong><p>{t.note}</p><nav><button onClick={()=>setTaskModal({category:t.category,task:t})}>✎ Sửa</button><button className="red" onClick={()=>void deleteTask(t)}>× Xóa</button></nav></div></article>)}{!grouped[col.key].length&&<p className="empty">Chưa có công việc</p>}</div><button className="add-button" onClick={()=>setTaskModal({category:col.key})}>＋ Thêm công việc</button></section>)}</div></section>
+    <section className="case-section"><header className="case-heading"><div><p className="eyebrow">PHÂN LOẠI CA BỆNH</p><h2>Ca bệnh theo từng cơ sở</h2><p>Nhãn màu giúp phân biệt nhanh Nội trú và Ngoại trú.</p></div><strong>{cases.length} ca</strong></header><div className="facility-grid">{facilities.map(f=><section className="facility" key={f}><header><h3>{f}</h3><b>{cases.filter(c=>c.facility===f).length}</b></header><div className="case-list">{cases.filter(c=>c.facility===f).map(c=><article className={`case-card ${c.is_completed?"done":""}`} key={c.id}><div className="case-top"><span className={c.case_type==="Nội trú"?"inpatient":"outpatient"}>{c.case_type}</span><button className="check" onClick={()=>void toggleCase(c)}>{c.is_completed?"✓":""}</button></div><h4>{c.pet_name}</h4><p>{[c.species,c.breed,c.age_text].filter(Boolean).join(" · ")}</p><p className="diagnosis">{c.diagnosis||"Chưa ghi chẩn đoán"}</p><small>{c.monitoring_note}</small><nav><button onClick={()=>setCaseModal({mode:"detail",data:c})}>◎ Chi tiết</button><button onClick={()=>setCaseModal({mode:"edit",data:c})}>✎ Sửa</button><button className="red" onClick={()=>void deleteCase(c)}>× Xóa</button></nav></article>)}{!cases.some(c=>c.facility===f)&&<p className="empty">Chưa có ca bệnh</p>}</div><button className="add-button" onClick={()=>setCaseModal({mode:"add",data:blankCase(f)})}>＋ Thêm ca bệnh</button></section>)}</div></section>
+    <footer>Người sử dụng: <strong>Bác sĩ – Leader Trang</strong> · Dữ liệu đồng bộ với Supabase.</footer>
+    {taskModal&&<div className="modal" onMouseDown={()=>setTaskModal(null)}><form onSubmit={saveTask} onMouseDown={e=>e.stopPropagation()}><ModalHead title={taskModal.task?"Sửa công việc":"Thêm công việc"} close={()=>setTaskModal(null)}/><label>Tên công việc<input name="title" defaultValue={taskModal.task?.title} required autoFocus/></label><label>Ghi chú<textarea name="note" defaultValue={taskModal.task?.note} rows={3}/></label><label>Phân loại<select name="category" defaultValue={taskModal.category}>{categories.map(c=><option value={c.key} key={c.key}>{c.title}</option>)}</select></label><FormActions close={()=>setTaskModal(null)}/></form></div>}
+    {caseModal&&<div className="modal" onMouseDown={()=>setCaseModal(null)}><form className="case-form" onSubmit={saveCase} onMouseDown={e=>e.stopPropagation()}><ModalHead title={caseModal.mode==="add"?"Thêm ca bệnh":caseModal.mode==="edit"?"Sửa ca bệnh":"Chi tiết ca bệnh"} close={()=>setCaseModal(null)}/>{caseModal.mode==="detail"?<CaseDetail c={caseModal.data as MedicalCase}/>:<CaseFields c={caseModal.data}/>}<div className="form-actions"><button type="button" className="cancel" onClick={()=>setCaseModal(null)}>{caseModal.mode==="detail"?"Đóng":"Hủy"}</button>{caseModal.mode!=="detail"&&<button className="primary" type="submit">Lưu ca bệnh</button>}{caseModal.mode==="detail"&&<button className="primary" type="button" onClick={()=>setCaseModal({mode:"edit",data:caseModal.data})}>✎ Sửa ca bệnh</button>}</div></form></div>}
+  </main>
 }
-
-export default function Home() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [error, setError] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [note, setNote] = useState("");
-  const [category, setCategory] = useState<Category>("urgent");
-
-  const loadTasks = useCallback(async () => {
-    try {
-      const { data, error: queryError } = await supabase
-        .from("tasks")
-        .select("id,title,note,category,done,created_at")
-        .eq("status", "active")
-        .order("created_at", { ascending: true });
-      if (queryError) throw queryError;
-      setError("");
-      setTasks(((data || []) as TaskRow[]).map(rowToTask));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Không thể tải công việc.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadTasks(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadTasks]);
-
-  const dailyTasks = tasks.filter((task) => task.category !== "week");
-  const completed = dailyTasks.filter((task) => task.done).length;
-  const progress = dailyTasks.length ? Math.round((completed / dailyTasks.length) * 100) : 0;
-
-  const grouped = useMemo(() => Object.fromEntries(
-    (["urgent", "important", "routine", "week", "cases"] as Category[]).map((key) => [key, tasks.filter((task) => task.category === key)])
-  ) as Record<Category, Task[]>, [tasks]);
-
-  async function addTask(event: FormEvent) {
-    event.preventDefault();
-    if (!title.trim()) return;
-    setSyncing(true); setError("");
-    const temporaryId = crypto.randomUUID();
-    const optimistic: Task = { id: temporaryId, title: title.trim(), note: note.trim(), category, done: false, createdAt: new Date().toISOString() };
-    setTasks((current) => [...current, optimistic]);
-    setTitle(""); setNote(""); setShowForm(false);
-    const { data, error: insertError } = await supabase.from("tasks").insert({ title: optimistic.title, note: optimistic.note, category, done: false, owner: "Bác sĩ Trang" }).select("id,title,note,category,done,created_at").single();
-    if (insertError) { setTasks((current) => current.filter((task) => task.id !== temporaryId)); setError(insertError.message); }
-    else setTasks((current) => current.map((task) => task.id === temporaryId ? rowToTask(data as TaskRow) : task));
-    setSyncing(false);
-  }
-
-  async function toggleTask(id: string) {
-    const task = tasks.find((item) => item.id === id);
-    if (!task) return;
-    const nextDone = !task.done;
-    setTasks((current) => current.map((item) => item.id === id ? { ...item, done: nextDone } : item));
-    const { error: updateError } = await supabase.from("tasks").update({ done: nextDone }).eq("id", id);
-    if (updateError) { setTasks((current) => current.map((item) => item.id === id ? task : item)); setError(updateError.message); }
-  }
-
-  async function deleteTask(id: string) {
-    if (!confirm("Xóa công việc này?")) return;
-    const previous = tasks;
-    setTasks((current) => current.filter((task) => task.id !== id));
-    const { error: deleteError } = await supabase.from("tasks").update({ status: "archived", archived_at: new Date().toISOString() }).eq("id", id);
-    if (deleteError) { setTasks(previous); setError(deleteError.message); }
-  }
-
-  async function moveTask(target: Category) {
-    if (!draggedId) return;
-    const id = draggedId;
-    const previous = tasks;
-    setDraggedId(null);
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, category: target } : task));
-    const { error: moveError } = await supabase.from("tasks").update({ category: target }).eq("id", id);
-    if (moveError) { setTasks(previous); setError(moveError.message); }
-  }
-
-  function closeDay() {
-    if (!dailyTasks.length) return alert("Hôm nay chưa có công việc để lập báo cáo.");
-    document.title = `Bao-cao-cong-viec-${new Date().toISOString().slice(0, 10)}`;
-    window.print();
-  }
-
-  async function clearDay() {
-    if (confirm("Chỉ thực hiện sau khi anh đã lưu PDF. Xóa toàn bộ công việc trong ngày? Các việc trong tuần vẫn được giữ lại.")) {
-      setSyncing(true);
-      const { error: archiveError } = await supabase.from("tasks").update({ status: "archived", archived_at: new Date().toISOString() }).eq("status", "active").neq("category", "week");
-      if (archiveError) setError(archiveError.message); else setTasks((current) => current.filter((task) => task.category === "week"));
-      setSyncing(false);
-    }
-  }
-
-  async function loadSampleData() {
-    if (!confirm("Nạp lại toàn bộ dữ liệu mẫu? Dữ liệu hiện tại sẽ được thay thế.")) return;
-    setSyncing(true); setError("");
-    const now = new Date().toISOString();
-    const { error: archiveError } = await supabase.from("tasks").update({ status: "archived", archived_at: now }).eq("status", "active");
-    const rows = sampleTasks.map(({ title, note, category, done }) => ({ title, note, category, done, owner: "Bác sĩ Trang" }));
-    const { error: insertError } = archiveError ? { error: archiveError } : await supabase.from("tasks").insert(rows);
-    if (insertError) setError(insertError.message); else await loadTasks();
-    setSyncing(false);
-  }
-
-  return (
-    <main>
-      <header className="topbar">
-        <div className="brand"><span className="brand-mark"><Image src="/pkc-logo.png" alt="PKC Pet Center" width={62} height={39} priority /></span><div><strong>PKC PET CENTER</strong><small>Quản lý công việc cá nhân</small></div></div>
-        <div className="top-actions">
-          <button className="ghost demo-button" onClick={loadSampleData}>Dữ liệu mẫu</button>
-          <button className="ghost" onClick={closeDay}>Xuất báo cáo PDF</button>
-          <button className="primary" onClick={() => setShowForm(true)}>＋ Tạo công việc</button>
-        </div>
-      </header>
-
-      <section className="welcome">
-        <div><p className="eyebrow">{todayLabel()}</p><h1>Chào Bác sĩ Trang,<br/><em>sẵn sàng cho một ngày hiệu quả.</em></h1><p className="role-line">Leader Trang · PKC Pet Center</p></div>
-        <div className="progress-card"><div><span>Tiến độ hôm nay</span><strong>{completed}/{dailyTasks.length} việc</strong></div><div className="progress"><i style={{ width: `${progress}%` }} /></div><small>{progress}% hoàn thành</small></div>
-      </section>
-
-      {(loading || syncing || error) && <section className={`sync-status ${error ? "has-error" : ""}`}>
-        <span>{loading ? "Đang tải dữ liệu từ Supabase…" : syncing ? "Đang đồng bộ Supabase…" : error}</span>
-        {error && <button onClick={() => void loadTasks()}>Thử lại</button>}
-      </section>}
-
-      <section className="case-section" onDragOver={(e) => e.preventDefault()} onDrop={() => moveTask("cases")}>
-        <header className="case-header">
-          <div><p className="eyebrow">THEO DÕI CHUYÊN MÔN</p><h2>Các ca bệnh cần theo dõi hôm nay</h2><span>Thông tin giả lập phục vụ bản mẫu</span></div>
-          <div className="case-actions"><strong>{grouped.cases.length} ca</strong><button onClick={() => { setCategory("cases"); setShowForm(true); }}>＋ Thêm ca bệnh</button></div>
-        </header>
-        <div className="case-grid">
-          {grouped.cases.map((task, index) => <div className="case-wrap" key={task.id}><span className="case-number">{String(index + 1).padStart(2,"0")}</span><TaskCard task={task} onToggle={toggleTask} onDelete={deleteTask} onDragStart={setDraggedId}/></div>)}
-        </div>
-      </section>
-
-      <section className="workspace">
-        <div className="board">
-          {columns.map((column) => (
-            <section className={`column ${column.tone}`} key={column.key} onDragOver={(e) => e.preventDefault()} onDrop={() => moveTask(column.key)}>
-              <header><div><h2>{column.title}</h2><p>{column.subtitle}</p></div><span>{grouped[column.key].length}</span></header>
-              <div className="task-list">
-                {grouped[column.key].map((task) => <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onDragStart={setDraggedId} />)}
-                {!grouped[column.key].length && <div className="empty"><span>＋</span><p>Kéo công việc vào đây<br/>hoặc tạo việc mới</p></div>}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <aside className="week" onDragOver={(e) => e.preventDefault()} onDrop={() => moveTask("week")}>
-          <div className="week-head"><p>TRỌNG TÂM TUẦN</p><span>Tuần này</span></div>
-          <h2>Việc cần hoàn thành</h2>
-          <div className="week-list">
-            {grouped.week.map((task) => <TaskCard key={task.id} task={task} onToggle={toggleTask} onDelete={deleteTask} onDragStart={setDraggedId} />)}
-            {!grouped.week.length && <p className="week-empty">Chưa có việc nào.<br/>Kéo việc vào đây để lên kế hoạch tuần.</p>}
-          </div>
-          <button className="week-add" onClick={() => { setCategory("week"); setShowForm(true); }}>＋ Thêm việc trong tuần</button>
-        </aside>
-      </section>
-
-      <footer><p>Người sử dụng: <strong>Bác sĩ – Leader Trang</strong> · Dữ liệu đồng bộ với Supabase.</p><div><button onClick={closeDay}>Chốt ngày & xuất PDF</button><button className="danger" onClick={clearDay}>Xóa dữ liệu ngày</button></div></footer>
-
-      {showForm && <div className="modal" onMouseDown={() => setShowForm(false)}>
-        <form onSubmit={addTask} onMouseDown={(e) => e.stopPropagation()}>
-          <div className="form-head"><div><p>VIỆC MỚI</p><h2>Thêm một công việc</h2></div><button type="button" onClick={() => setShowForm(false)}>×</button></div>
-          <label>Tên công việc<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Hoàn thiện kế hoạch tuần" required /></label>
-          <label>Ghi chú<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Thông tin ngắn cần ghi nhớ" rows={3}/></label>
-          <label>Phân loại<select value={category} onChange={(e) => setCategory(e.target.value as Category)}><option value="urgent">Gấp · Quan trọng</option><option value="important">Quan trọng · Chưa gấp</option><option value="routine">Việc thường xuyên</option><option value="cases">Ca bệnh cần theo dõi</option><option value="week">Cần hoàn thành trong tuần</option></select></label>
-          <div className="form-actions"><button type="button" className="ghost" onClick={() => setShowForm(false)}>Hủy</button><button className="primary" type="submit">Thêm công việc</button></div>
-        </form>
-      </div>}
-
-      <section className="print-report">
-        <div className="print-brand"><Image src="/pkc-logo.png" alt="PKC Pet Center" width={80} height={52}/><p>PKC PET CENTER</p></div><p className="eyebrow">BÁO CÁO CÔNG VIỆC NGÀY · BÁC SĨ – LEADER TRANG</p><h1>{todayLabel()}</h1>
-        <div className="print-stats"><span>Tổng số việc <strong>{dailyTasks.length}</strong></span><span>Hoàn thành <strong>{completed}</strong></span><span>Tỷ lệ <strong>{progress}%</strong></span></div>
-        {columns.map((column) => <div className="print-group" key={column.key}><h2>{column.title}</h2>{grouped[column.key].length ? grouped[column.key].map((task) => <p key={task.id}><b>{task.done ? "✓" : "○"}</b> {task.title} {task.note && <small>— {task.note}</small>}</p>) : <p className="muted">Không có công việc</p>}</div>)}
-        <div className="print-group"><h2>Các ca bệnh cần theo dõi</h2>{grouped.cases.map((task) => <p key={task.id}><b>{task.done ? "✓" : "○"}</b> {task.title} <small>— {task.note}</small></p>)}</div>
-      </section>
-    </main>
-  );
-}
+function ModalHead({title,close}:{title:string;close:()=>void}){return <div className="form-head"><div><p>PKC PET CENTER</p><h2>{title}</h2></div><button type="button" onClick={close}>×</button></div>}
+function FormActions({close}:{close:()=>void}){return <div className="form-actions"><button type="button" className="cancel" onClick={close}>Hủy</button><button className="primary" type="submit">Lưu công việc</button></div>}
+function CaseFields({c}:{c:MedicalCase|Omit<MedicalCase,"id"|"created_at">}){return <div className="field-grid"><label>Tên thú cưng<input name="pet_name" defaultValue={c.pet_name} required autoFocus/></label><label>Loài<input name="species" defaultValue={c.species}/></label><label>Giống<input name="breed" defaultValue={c.breed}/></label><label>Tuổi<input name="age_text" defaultValue={c.age_text}/></label><label>Phân loại<select name="case_type" defaultValue={c.case_type}><option>Nội trú</option><option>Ngoại trú</option></select></label><label>Cơ sở<select name="facility" defaultValue={c.facility}>{facilities.map(f=><option key={f}>{f}</option>)}</select></label><label>Ngày theo dõi<input type="date" name="case_date" defaultValue={c.case_date}/></label><label>Trạng thái<input name="status" defaultValue={c.status}/></label><label>Chủ nuôi<input name="owner_name" defaultValue={c.owner_name}/></label><label>Điện thoại<input name="owner_phone" defaultValue={c.owner_phone}/></label><label className="wide">Chẩn đoán<textarea name="diagnosis" defaultValue={c.diagnosis} rows={2}/></label><label className="wide">Ghi chú theo dõi<textarea name="monitoring_note" defaultValue={c.monitoring_note} rows={2}/></label><label className="wide">Điều trị<textarea name="treatment_note" defaultValue={c.treatment_note} rows={2}/></label><label>Bác sĩ phụ trách<input name="doctor_name" defaultValue={c.doctor_name}/></label><label className="checkbox"><input type="checkbox" name="is_completed" defaultChecked={c.is_completed}/> Đã hoàn thành theo dõi</label></div>}
+function CaseDetail({c}:{c:MedicalCase}){const rows=[["Thú cưng",c.pet_name],["Phân loại",c.case_type],["Cơ sở",c.facility],["Thông tin",[c.species,c.breed,c.age_text].filter(Boolean).join(" · ")],["Chủ nuôi",[c.owner_name,c.owner_phone].filter(Boolean).join(" · ")],["Chẩn đoán",c.diagnosis],["Theo dõi",c.monitoring_note],["Điều trị",c.treatment_note],["Bác sĩ",c.doctor_name],["Trạng thái",c.status]];return <div className="detail-grid">{rows.map(([a,b])=><div key={a}><span>{a}</span><strong>{b||"—"}</strong></div>)}</div>}
